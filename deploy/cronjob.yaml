@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: market-scanner
+  namespace: factory
+spec:
+  schedule: "0 5 * * *"  # 5 AM daily, before analyze (6 AM) and build (6:30 AM)
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      activeDeadlineSeconds: 1800
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: market-scanner
+              image: ghcr.io/timholm/market-scanner:latest
+              command: ["market-scanner", "scan-queue"]
+              env:
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: factory-secrets
+                      key: github-token
+                - name: FACTORY_DATA_DIR
+                  value: /data
+                - name: NOVELTY_THRESHOLD
+                  value: "0.6"
+              volumeMounts:
+                - name: factory-data
+                  mountPath: /data
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "500m"
+          volumes:
+            - name: factory-data
+              persistentVolumeClaim:
+                claimName: factory-data

@@ -1,0 +1,78 @@
+# market-scanner
+
+> Pre-build competitor intelligence scanner for autonomous software factories
+
+## Overview
+
+market-scanner searches GitHub, npm, and PyPI for existing solutions before building a product. It computes a novelty score (0.0 = saturated market, 1.0 = completely novel) and recommends whether to proceed or skip. Designed as a gate in the Claude Code Factory's autonomous build pipeline.
+
+## Usage
+
+CLI scan: `market-scanner scan --name "tool-name" --problem "problem description" [--json]`
+CLI queue: `market-scanner scan-queue` (batch process pending factory items)
+HTTP API: `POST /scan {"name":"tool-name","problem":"description"}` on port 8090
+API query: `GET /scan/:name?problem=...`
+Reports: `GET /reports` and `GET /reports/:name`
+Health: `GET /health`
+
+Exit code 1 when novelty is below threshold (default 0.6), enabling CI/pipeline gating.
+
+## Key Files
+
+- main.go -- CLI entrypoint with cobra commands: scan, scan-queue, serve
+- internal/scanner/scanner.go -- orchestrates concurrent GitHub/npm/PyPI searches, computes novelty score
+- internal/scanner/github.go -- GitHub Search API client, finds repos with 100+ stars by name/topic/keywords
+- internal/scanner/npm.go -- npm registry search client with quality/popularity scoring
+- internal/scanner/pypi.go -- PyPI JSON API lookups + warehouse HTML search result parsing
+- internal/scanner/report.go -- human-readable report formatting (full and compact)
+- internal/db/db.go -- SQLite persistence (WAL mode) with scan_results and build_queue tables
+- internal/api/server.go -- Gin HTTP API with health, scan, and report endpoints
+- internal/config/config.go -- environment-based configuration with defaults
+- deploy/cronjob.yaml -- K8s CronJob for daily queue scanning in factory namespace
+- Dockerfile -- multi-stage alpine build with CGO/SQLite support
+- Makefile -- build, test, lint, docker, deploy targets
+
+## Novelty Scoring
+
+Score starts at 1.0 with penalties from each registry:
+- GitHub (max -0.60): per-repo penalty scaled by stars/10000 and name similarity
+- npm (max -0.25): per-package penalty scaled by npm quality score and name similarity
+- PyPI (max -0.15): per-package penalty scaled by name similarity
+
+Name similarity = substring match (0.8 weight) + word overlap (0.4 weight), capped at 1.0.
+
+Thresholds: >= 0.8 PROCEED, >= 0.6 PROCEED_WITH_CAUTION, >= 0.3 SKIP (competition), < 0.3 SKIP (saturated).
+
+## Configuration
+
+GITHUB_TOKEN -- GitHub PAT for API access (optional, increases rate limits)
+FACTORY_DATA_DIR -- base data directory (default: /tmp/factory-data)
+DB_PATH -- SQLite file path (default: $FACTORY_DATA_DIR/market-scanner.db)
+NOVELTY_THRESHOLD -- minimum score to proceed (default: 0.6)
+LISTEN_ADDR -- HTTP server address (default: :8090)
+
+## Tech Stack
+
+Go 1.22, cobra (CLI), gin (HTTP), mattn/go-sqlite3 (persistence, requires CGO).
+All registry searches use net/http directly. No external service dependencies beyond the public APIs.
+
+## Pipeline Position
+
+Runs as K8s CronJob at 5 AM in factory namespace, before analyze (6 AM) and build (6:30 AM).
+Shares factory-data PVC with other factory components. GitHub token from factory-secrets Secret.
+
+## API Response Shape
+
+Scan returns: name, problem, github[] (full_name, description, stars, forks, language, url, topics), npm[] (name, description, version, keywords, url, score), pypi[] (name, description, version, url), novelty_score, recommendation, scan_duration.
+
+## Database
+
+SQLite with WAL journaling and 10s busy timeout.
+Tables: scan_results (id, name, problem, novelty_score, recommendation, report_json, scanned_at), build_queue (id, name, problem, status, created_at, scanned_at).
+Status values: pending, scanned_proceed, scanned_skip.
+
+## Links
+
+- Repository: https://github.com/timholm/market-scanner
+- Factory: https://github.com/timholm/claude-code-factory
+- License: MIT
