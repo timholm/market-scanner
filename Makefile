@@ -34,4 +34,4 @@ push: docker
 	docker push $(IMAGE)
 
 deploy:
-	kubectl apply -f deploy/cronjob.yaml
+	kubectl apply -f deploy/

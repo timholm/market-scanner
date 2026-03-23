@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: market-scanner
+  namespace: factory
+  labels:
+    app: market-scanner
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: market-scanner
+  template:
+    metadata:
+      labels:
+        app: market-scanner
+    spec:
+      containers:
+        - name: market-scanner
+          image: ghcr.io/timholm/market-scanner:latest
+          command: ["market-scanner", "serve"]
+          ports:
+            - containerPort: 8090
+              name: http
+          env:
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: factory-secrets
+                  key: github-token
+            - name: FACTORY_DATA_DIR
+              value: /data
+            - name: NOVELTY_THRESHOLD
+              value: "0.6"
+            - name: LISTEN_ADDR
+              value: ":8090"
+          volumeMounts:
+            - name: factory-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+      volumes:
+        - name: factory-data
+          persistentVolumeClaim:
+            claimName: factory-data
